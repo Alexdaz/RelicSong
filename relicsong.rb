@@ -53,7 +53,7 @@ end
 module Lyrics
   API = 'https://lrclib.net/api'
   # LRCLIB asks every app to identify itself: name, version and a link to the project.
-  USER_AGENT = 'Relic Song v1.0 (https://github.com/alexdaz/relicsong)'
+  USER_AGENT = 'Relic Song v1.1 (https://github.com/alexdaz/relicsong)'
 
   def self.find(song)
     lyrics = exact_match(song) || first_search_result(song)
@@ -90,13 +90,18 @@ module Lyrics
     response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 5, read_timeout: 5) do |http|
       http.request(Net::HTTP::Get.new(uri, 'User-Agent' => USER_AGENT))
     end
-    wait_for(response['Retry-After']) if response.is_a?(Net::HTTPTooManyRequests)
+    wait_for(response['Retry-After']) if busy?(response)
     JSON.parse(response.body) if response.is_a?(Net::HTTPSuccess)
   rescue StandardError
     nil
   end
 
-  # When LRCLIB answers 429, no requests are sent until Retry-After has passed.
+  # LRCLIB asks for a break with 429 (too many requests) or 503 (server overloaded).
+  def self.busy?(response)
+    response.is_a?(Net::HTTPTooManyRequests) || response.is_a?(Net::HTTPServiceUnavailable)
+  end
+
+  # While LRCLIB is busy, no requests are sent until Retry-After has passed.
   def self.wait_for(retry_after)
     seconds = retry_after.to_i
     seconds = 60 unless seconds.positive? # Missing or unreadable header: wait a minute.
