@@ -53,16 +53,18 @@ end
 module Lyrics
   API = 'https://lrclib.net/api'
   # LRCLIB asks every app to identify itself: name, version and a link to the project.
-  USER_AGENT = 'Relic Song v1.1 (https://github.com/alexdaz/relicsong)'
+  USER_AGENT = 'Relic Song v1.2 (https://github.com/alexdaz/relicsong)'
 
   def self.find(song)
     lyrics = exact_match(song) || first_search_result(song)
     return lyrics if lyrics
 
-    rate_limited? ? 'LRCLIB asked us to wait a bit, lyrics will be back with the next song.' : "Couldn't find the lyrics :("
+    rate_limited? ? 'LRCLIB asked us to wait a bit, retrying in a moment...' : "Couldn't find the lyrics :("
   end
 
   def self.exact_match(song)
+    return nil if song.artist.to_s.empty? # /api/get requires an artist, the search doesn't.
+
     result = request('get', artist_name: song.artist, track_name: song.title)
     lyrics_from(result)
   end
@@ -91,9 +93,14 @@ module Lyrics
       http.request(Net::HTTP::Get.new(uri, 'User-Agent' => USER_AGENT))
     end
     wait_for(response['Retry-After']) if busy?(response)
-    JSON.parse(response.body) if response.is_a?(Net::HTTPSuccess)
+    JSON.parse(response.body) if json?(response)
   rescue StandardError
     nil
+  end
+
+  # LRCLIB asks to check both the status and the Content-Type before reading JSON.
+  def self.json?(response)
+    response.is_a?(Net::HTTPSuccess) && response.content_type == 'application/json'
   end
 
   # LRCLIB asks for a break with 429 (too many requests) or 503 (server overloaded).
@@ -144,9 +151,9 @@ loop do
   if song.nil?
     puts 'Spotify is not playing anything... :(' unless last_song == :waiting
     last_song = :waiting
-  elsif song != last_song
+  elsif song != last_song && !Lyrics.rate_limited?
     show(song)
-    last_song = song
+    last_song = song unless Lyrics.rate_limited? # Retry this song once LRCLIB is ready.
   end
 
   sleep 1
